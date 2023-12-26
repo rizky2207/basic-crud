@@ -2,15 +2,13 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Models\User;
+use App\Models\Customer;
 use Illuminate\Http\Request;
-use Illuminate\Http\JsonResponse;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Validation\ValidationException;
-use Illuminate\Support\Facades\Auth;
 
 class AuthController extends Controller
 {
@@ -32,23 +30,36 @@ class AuthController extends Controller
      */
     public function register(Request $request)
     {
-        $validatedData = $request->validate([
-            'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
-            'password' => 'required|string|min:6|confirmed',
+        $validator = Validator::make($request->all(), [
+            'name'     => 'required|string|max:255',
+            'email'    => 'required|email|unique:users',
+            'password' => 'required|confirmed',
         ]);
+
+        if ($validator->fails()) {
+            return response()->json($validator->errors(), 400);
+        }
 
         $user = User::create([
-            'name' => $validatedData['name'],
-            'email' => $validatedData['email'],
-            'password' => bcrypt($validatedData['password']),
+            'name'      => $request->name,
+            'email'     => $request->email,
+            'password'  => Hash::make($request->password)
         ]);
 
-        $token = $user->createToken('MyApp')->accessToken;
+        $token = JWTAuth::fromUser($user);
 
-        return response()->json(['token' => $token], 200);
+        if ($user) {
+            return response()->json([
+                'success' => true,
+                'user'    => $user,
+                'token'   => $token
+            ], 201);
+        }
+
+        return response()->json([
+            'success' => false,
+        ], 409);
     }
-
 
     /**
      * login
@@ -58,55 +69,40 @@ class AuthController extends Controller
      */
     public function login(Request $request)
     {
-        $request->validate([
-            'email' => 'required|string|email',
-            'password' => 'required|string',
+        $validator = Validator::make($request->all(), [
+            'email'    => 'required|email',
+            'password' => 'required',
         ]);
 
-        $credentials = request(['email', 'password']);
-
-        if (!Auth::attempt($credentials)) {
-            return response()->json(['message' => 'Unauthorized'], 401);
+        if ($validator->fails()) {
+            return response()->json($validator->errors(), 400);
         }
 
-        $user = $request->user();
-        $tokenResult = $user->createToken('Personal Access Token');
-        $token = $tokenResult->token;
+        $credentials = $request->only('email', 'password');
 
-        if ($request->remember_me) {
-            $token->expires_at = now()->addWeeks(1);
+        if (!$token = auth()->guard('api')->attempt($credentials)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Email or Password is incorrect'
+            ], 401);
         }
-
-        $token->save();
-
         return response()->json([
-            'succsess' => true,
-            'access_token' => $tokenResult->accessToken,
-            'message' => 'User login successfully.',
-            'expires_at' => $token->expires_at,
-        ]);
+            'success' => true,
+            'user'    => auth()->guard('api')->user(),
+            'token'   => $token
+        ], 201);
     }
 
-    public function logout(Request $request)
+    /**
+     * getUser
+     *
+     * @return void
+     */
+    public function getUser()
     {
-        $request->user()->token()->revoke();
-
-        return response()->json(['message' => 'User logged out successfully']);
+        return response()->json([
+            'success' => true,
+            'user'    => auth()->user()
+        ], 200);
     }
-
-
-
-
-    // /**
-    //  * getUser
-    //  *
-    //  * @return void
-    //  */
-    // public function getUser()
-    // {
-    //     return response()->json([
-    //         'success' => true,
-    //         'user'    => auth()->user()
-    //     ], 200);
-    // }
 }
